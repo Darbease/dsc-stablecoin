@@ -1,6 +1,6 @@
 -include .env
 
-.PHONY: all test clean deploy fund help install snapshot format anvil
+.PHONY: all test clean deploy fund help install snapshot format anvil cre-install cre-bindings cre-test cre-simulate cre-broadcast
 
 DEFAULT_ANVIL_KEY := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -39,3 +39,26 @@ endif
 
 deploy:
 	@forge script script/DeployDSC.s.sol:DeployDSC $(NETWORK_ARGS)
+
+# ============================================================================
+# CRE — Chainlink Runtime Environment liquidator workflow (DSCStableCoin_CRE/)
+# ============================================================================
+
+cre-install:
+	@cd DSCStableCoin_CRE/CRELiquidator && bun install
+
+cre-bindings:
+	@mkdir -p DSCStableCoin_CRE/CRELiquidator/contracts/evm/src/abi
+	@cp out/DSCEngine.sol/DSCEngine.json DSCStableCoin_CRE/CRELiquidator/contracts/evm/src/abi/
+	@cp out/DecentralizedStableCoin.sol/DecentralizedStableCoin.json DSCStableCoin_CRE/CRELiquidator/contracts/evm/src/abi/
+	@cd DSCStableCoin_CRE/CRELiquidator && cre generate-bindings evm --language typescript
+	@echo "Bindings regenerated. Remember to re-apply the manual patches to contracts/evm/ts/generated/index.ts (see CLAUDE.md gotcha #2)."
+
+cre-test:
+	@cd DSCStableCoin_CRE/CRELiquidator && bun test main.test.ts
+
+cre-simulate:
+	@cd DSCStableCoin_CRE && cre workflow simulate ./CRELiquidator --target=staging-settings
+
+cre-broadcast:
+	@cd DSCStableCoin_CRE && cre workflow simulate ./CRELiquidator --target=staging-settings --broadcast

@@ -1,0 +1,13 @@
+# Secrets
+*.env
+.env
+secrets.yaml
+
+# Bun / Node
+node_modules/
+dist/
+
+# CRE build artifacts
+.cre_build_tmp.js
+.cre_build_tmp.wasm
+*.wasm
