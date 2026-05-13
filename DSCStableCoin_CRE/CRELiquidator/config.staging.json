@@ -1,0 +1,8 @@
+{
+  "schedule": "*/30 * * * * *",
+  "chainSelector": "7759470850252068959",
+  "dscEngineAddress": "0x0165878a594ca255338adfa4d48449f69242eb8f",
+  "trackedUsers": [
+    "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  ]
+}

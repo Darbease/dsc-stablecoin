@@ -78,6 +78,69 @@ Deployment transfers DSC ownership to DSCEngine immediately (`script/DeployDSC.s
 - `DecentralizedStableCoin.sol`: 100% across all dimensions
 - `OracleLib.sol`: 100% across all dimensions
 
+### CRE integration (`DSCStableCoin_CRE/`)
+
+TypeScript Chainlink Runtime Environment workflow that monitors DSC positions on a cron and surfaces / dispatches liquidations. Self-contained project (Bun + `@chainlink/cre-sdk`), separate from the Foundry tree. Detailed setup + architecture in `DSCStableCoin_CRE/CRELiquidator/README.md`.
+
+**Status**: local-sim read + dry-run write working end-to-end against Anvil. Broadcast deferred (needs `KeystoneForwarder` + `ReceiverTemplate` consumer adapter on the target chain).
+
+**Project layout split**: project root config (`project.yaml`, `.env`, `secrets.yaml`) lives at `DSCStableCoin_CRE/`; the workflow lives at `DSCStableCoin_CRE/CRELiquidator/`. CRE CLI commands run from `DSCStableCoin_CRE/`, not from `CRELiquidator/`.
+
+---
+
+## CRE-specific gotchas (hard-won lessons — read before touching this code)
+
+These cost real time during the integration. Filing them so they don't have to be rediscovered.
+
+### 1. `cre generate-bindings` requires the rigid `contracts/<chain-family>/src/abi/` layout
+The `--abi` flag overrides the file path but the tool still does a sanity check for a `contracts/` directory at the project root. Copy or symlink ABI JSON files into `contracts/evm/src/abi/`, then run `cre generate-bindings evm --language typescript` with no `--abi` flag.
+
+### 2. Generated bindings collide on `DecodedLog<T>` when two contracts are present
+Every generated `<Contract>.ts` exports its own `DecodedLog<T>` interface. The auto-generated `index.ts` does `export *` from each, which fails compilation with TS2308. Patch `index.ts` to be explicit:
+```typescript
+export { DSCEngineABI, DSCEngine } from './DSCEngine'
+export { DecentralizedStableCoinABI, DecentralizedStableCoin } from './DecentralizedStableCoin'
+```
+Re-applied every time you regenerate bindings.
+
+### 3. `_mock.ts` files leak `bun:test` into the WASM bundle
+The generated `*_mock.ts` files import `@chainlink/cre-sdk/test`, which transitively imports `bun:test`. `cre-compile` targets browser/WASM and rejects `bun:test`. **Production code (`main.ts`) must NOT import from a barrel that re-exports the mocks**. In tests, import the mocks directly: `import { newDSCEngineMock } from './contracts/evm/ts/generated/DSCEngine_mock'`.
+
+### 4. Anvil's `finalized` block tag points to genesis
+The generated bindings hardcode `blockNumber: LAST_FINALIZED_BLOCK_NUMBER`. Anvil's `finalized` defaults to block 0. Result: every read returns `0x` (empty), viem fails with "Cannot decode zero data". After every state-changing tx on Anvil that you want the simulator to see, run:
+```bash
+cast rpc anvil_mine 100 --rpc-url http://localhost:8545
+```
+
+### 5. `rpcs:` config alone doesn't register the EVM capability for non-mainstream chains
+For Anvil (chain selector `7759470850252068959`), adding to `rpcs:` in `project.yaml` is not enough — the simulator fails with `no compatible capability found for id evm:ChainSelector:<n>@1.0.0`. Move to `experimental-chains:`:
+```yaml
+experimental-chains:
+  - chain-selector: 7759470850252068959
+    rpc-url: http://localhost:8545
+    forwarder: "0x0000000000000000000000000000000000000000"
+```
+The simulator output will confirm with `Added experimental chain (chain-selector: ...)`.
+
+### 6. `writeReport*` is not what it looks like
+The generated `dsce.writeReportFromLiquidate(...)` is **not** a direct call to `dsce.liquidate(...)`. It generates a CRE-signed report wrapping the calldata, submits it to a `KeystoneForwarder` at the configured address, and the Forwarder calls `consumer.onReport(metadata, report)` on the receiver. The consumer must inherit `ReceiverTemplate` and route `onReport` to whatever it wants. Calling `liquidate` directly via this binding **does not work** unless the receiver knows how to dispatch the report back to `dsce.liquidate(...)` — typically via a separate adapter contract.
+
+### 7. `--broadcast` requires a real Forwarder
+Dry-run (default) works without a Forwarder — the simulator stops at report generation. `--broadcast` actually submits to the chain via the Forwarder. With `forwarder: 0x000...000` and `--broadcast`, you get:
+```
+WriteReport returned an error: no contract code at given address
+```
+Either deploy a real `KeystoneForwarder` to Anvil, or ship the dry-run as the demo.
+
+### 8. `cre workflow simulate` runs from the project root, not the workflow folder
+```bash
+cd DSCStableCoin_CRE && cre workflow simulate ./CRELiquidator --target=staging-settings
+```
+Running it from inside `CRELiquidator/` fails — it can't find `project.yaml`.
+
+### 9. Chain selectors are JSON-unsafe as `bigint`
+Chain selectors like `16015286601757825753n` overflow standard JSON `number`. Store them in config as strings, then `BigInt(config.chainSelector)` in the workflow.
+
 ---
 
 ## Patrick's industry patterns (study these)

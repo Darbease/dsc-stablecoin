@@ -119,6 +119,23 @@ Pinned in `foundry.toml` remappings:
 - `forge-std@v1.5.3`
 - `foundry-devops@0.1.0`
 
+## CRE integration (`DSCStableCoin_CRE/`)
+
+A [Chainlink Runtime Environment](https://docs.chain.link/cre) workflow that monitors deployed `DSCEngine` positions on a cron and automatically liquidates any user whose health factor drops below `MIN_HEALTH_FACTOR`. Lives in `DSCStableCoin_CRE/` as a self-contained TypeScript project (Bun + `@chainlink/cre-sdk`).
+
+End-to-end **local simulation** is working: cron trigger → read `getHealthFactor()` for tracked users against a local Anvil-deployed `DSCEngine` → for underwater positions, generate a CRE-signed report wrapping a `liquidate(...)` call → dispatch via `writeReport`. Verified by manufacturing an underwater position (10 WETH @ $1700 collateralizing 9000 DSC → HF = 0.944) and watching the workflow detect + queue the liquidation.
+
+**Onchain broadcast is intentionally deferred** — it requires deploying a `KeystoneForwarder` to the target chain plus a `ReceiverTemplate` consumer adapter, which is Chainlink-infrastructure work separate from the workflow itself. See [`DSCStableCoin_CRE/CRELiquidator/README.md`](DSCStableCoin_CRE/CRELiquidator/README.md) for the full architecture, the dry-run vs broadcast split, and the path to wire onchain execution.
+
+Quick start (after deploying DSCEngine to Anvil via `make deploy`):
+
+```bash
+cd DSCStableCoin_CRE/CRELiquidator
+bun install
+cd ..
+cre workflow simulate ./CRELiquidator --target=staging-settings
+```
+
 ## Acknowledgments
 
 - [Cyfrin Updraft](https://updraft.cyfrin.io/) and [Patrick Collins](https://github.com/PatrickAlphaC) for the curriculum and the [reference implementation](https://github.com/Cyfrin/foundry-defi-stablecoin-cu) this project is built against.
